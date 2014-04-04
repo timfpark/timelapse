@@ -1,45 +1,34 @@
 var nitrogen = require('nitrogen')
   , SunCalc = require('suncalc');
 
-var session;
-var params;
-var checkInterval;
+function TimelapseApp(session, params) {
+    this.session = session;
+    this.params = params;
+}
 
-// TODO: parameterize all of these
-var LATITUDE = 36.972;
-var LONGITUDE =  -122.0263;
+TimelapseApp.prototype.fetchCurrentShots = function(callback) {
+    var self = this;
+    this.currentShots = {};
 
-var SHOTS_PER_DAY = 20;
-
-var currentShots = {};
-
-function fetchCurrentShots(callback) {
-    currentShots = {};
-
-    nitrogen.Message.find(session, { type: 'cameraCommand', to: params.camera_id }, {}, function(err, commands) {
+    // TODO: use command tags to narrow search further.
+    nitrogen.Message.find(this.session, { type: 'cameraCommand', to: this.params.camera_id }, {}, function(err, commands) {
         if (err) return callback(err);
 
         commands.forEach(function(cameraCommand) {
-            currentShots[cameraCommand.ts.toString()] = cameraCommand;
+            self.currentShots[cameraCommand.ts.toString()] = cameraCommand;
         });
 
         return callback();
     });
 }
 
-function setupShots() {
-    SunCalc.addTime(0.0, 'sunrise', 'sunset');
-}
-
-function checkShot(shotTime, shotTag) {
-    console.log(shotTime.toString());
-
-    if (!currentShots[shotTime.toString()]) {
-        // expire the camera command if not taken within 15 minutes. 
+TimelapseApp.prototype.checkShot = function(shotTime, shotTag) {
+    if (!this.currentShots[shotTime.toString()]) {
+        // expire the camera command if not taken within 15 minutes.
         var expireTime = new Date(shotTime.getTime() + 15 * 60 * 1000);
 
         var cmd = new nitrogen.Message({
-              to: params.camera_id,
+              to: this.params.camera_id,
               type: 'cameraCommand',
               ts: shotTime,
               expires: expireTime,
@@ -51,70 +40,59 @@ function checkShot(shotTime, shotTag) {
               }
         });
 
-        session.log.info('adding shot at: ' + cmd.ts.toString());
-        cmd.send(session);
-    } else {
-        session.log.info('already have shot at: ' + shotTime.toString());        
+        this.session.log.info('adding shot at: ' + cmd.ts.toString());
+        cmd.send(this.session);
     }
 }
 
-function checkShotsDaysOut(daysOut) {
+TimelapseApp.prototype.checkShotsDaysOut = function(daysOut) {
     var date = new Date();
     date.setDate(new Date().getDate() + daysOut);
 
-    var times = SunCalc.getTimes(date, LATITUDE, LONGITUDE);
-
-    console.log('sunrise: ' + times['sunrise']);
-    console.log('sunset: ' + times['sunset']);
-
+    var times = SunCalc.getTimes(date, this.params.latitude, this.params.longitude);
     var difference = times['sunset'].getTime() - times['sunrise'].getTime();
+    var shotIncrement = difference / this.params.shots_per_day;
 
-    console.log('difference: ' + difference);
-
-    var shotIncrement = difference / SHOTS_PER_DAY;
-
-    for (var shot=0; shot <= SHOTS_PER_DAY; shot++) {  
+    for (var shot=0; shot <= this.params.shots_per_day; shot++) {
         var shotTime = new Date(times['sunrise'].getTime() + shotIncrement * shot);
-        checkShot(shotTime, 'timelapse');
+        this.checkShot(shotTime, 'timelapse');
     }
 }
 
-function checkShots() {
+TimelapseApp.prototype.checkShots = function() {
     var daysOut;
+    var self = this;
 
-    session.log.info("checking shots");
-
-    fetchCurrentShots(function(err) {
-        if (err) return session.log.error('fetching current shots failed: ' + err);
+    this.fetchCurrentShots(function(err) {
+        if (err) return self.session.log.error('fetching current shots failed: ' + err);
 
         for (daysOut=0; daysOut <= 1; daysOut++) {
-            checkShotsDaysOut(daysOut);
+            self.checkShotsDaysOut(daysOut);
         }
     });
 }
 
-var start = function(s, p) {
-    session = s;  
-    params = p;
+TimelapseApp.prototype.start = function() {
+    var self = this;
 
-    ['camera_id'].forEach(function(key) {
-        if (!params[key]) {
-            session.log.error('required parameter ' + key +' not supplied.');
-            return process.exit(0);            
+    ['camera_id', 'latitude', 'longitude'].forEach(function(key) {
+        if (!self.params[key]) {
+            self.session.log.error('required parameter ' + key +' not supplied.');
+            return process.exit(0);
         }
     });
 
-    setupShots();
-    
-    checkShots();
-    checkInterval = setInterval(checkShots, 24 * 60 * 60 * 1000);
+    this.params.shots_per_day = this.params.shots_per_day || 20;
+
+    // we want to know when the sun is 0 degrees above the horizon both for sunrise and sunset.
+    SunCalc.addTime(0.0, 'sunrise', 'sunset');
+
+    this.checkShots();
+    this.checkInterval = setInterval(function() { self.checkShots(); }, 24 * 60 * 60 * 1000);
 };
 
-var stop = function() {
-    clearInterval(checkInterval);
+TimelapseApp.prototype.stop = function() {
+    clearInterval(this.checkInterval);
 }
 
-module.exports = {
-    start: start,
-    stop: stop
-}
+module.exports = TimelapseApp;

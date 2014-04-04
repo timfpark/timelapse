@@ -7,7 +7,7 @@
   },
   "main": "./app",
   "author": "Tim Park <timfpark@gmail.com>",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "licenses": [
     {
       "type": "Apache",
@@ -15,7 +15,7 @@
     }
   ],
   "dependencies": {
-    "nitrogen": "~0.1.224",
+    "nitrogen": "~0.1.230",
     "suncalc": "~1.3.0"
   },
   "devDependencies": {
